@@ -1,4 +1,0 @@
-# Routing is defined via Docker labels on app/admin compose services.
-# This file is kept so the dynamic/ directory stays intentional; do not add a
-# bare `routers:` root key — Traefik file provider rejects it as standalone.
-http: {}

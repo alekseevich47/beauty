@@ -2,7 +2,8 @@ name: beauty-admin
 
 services:
   traefik:
-    image: traefik:v3.3
+    # v3.5+ ships a Docker client that negotiates API >= 1.40 (required by Engine 29+)
+    image: traefik:v3.5
     restart: unless-stopped
     command:
       - --configFile=/etc/traefik/traefik.yml
@@ -17,7 +18,6 @@ services:
     networks:
       - admin_net
     environment:
-      # Docker Engine 29+ rejects API < 1.40; Traefik's client defaults too low.
       DOCKER_API_VERSION: '1.44'
     labels:
       - traefik.enable=false
