@@ -1,0 +1,45 @@
+# Orchestrates production rollout in required order:
+#   data → migrate → app → admin
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag (sha short or latest)
+        required: false
+        default: latest
+      skip_data:
+        description: Skip data VM redeploy
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  data:
+    if: ${{ inputs.skip_data == false }}
+    uses: ./.github/workflows/deploy-data.yml
+    secrets: inherit
+
+  migrate:
+    needs: [data]
+    if: ${{ always() && (needs.data.result == 'success' || needs.data.result == 'skipped') }}
+    uses: ./.github/workflows/migrate.yml
+    secrets: inherit
+
+  app:
+    needs: [migrate]
+    uses: ./.github/workflows/deploy-app.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+    secrets: inherit
+
+  admin:
+    needs: [app]
+    uses: ./.github/workflows/deploy-admin.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+    secrets: inherit

@@ -1,0 +1,84 @@
+name: beauty-dev
+
+services:
+  postgres:
+    build:
+      context: ../..
+      dockerfile: infra/docker/postgres.Dockerfile
+    image: beauty-postgres:17-3.5-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-beauty}
+      POSTGRES_USER: ${POSTGRES_USER:-beauty}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-beauty}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-beauty} -d ${POSTGRES_DB:-beauty}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis-cache:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ['redis-server', '/usr/local/etc/redis/redis.conf']
+    ports:
+      - '6379:6379'
+    volumes:
+      - ../redis/redis-cache.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_cache_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  redis-queue:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ['redis-server', '/usr/local/etc/redis/redis.conf']
+    ports:
+      - '6380:6379'
+    volumes:
+      - ../redis/redis-queue.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_queue_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  centrifugo:
+    image: centrifugo/centrifugo:v5
+    restart: unless-stopped
+    command: ['centrifugo', '-c', '/centrifugo/config.json']
+    ports:
+      - '8000:8000'
+    volumes:
+      - ../centrifugo/config.dev.json:/centrifugo/config.json:ro
+    environment:
+      CENTRIFUGO_TOKEN_HMAC_SECRET_KEY: ${CENTRIFUGO_TOKEN_HMAC_SECRET_KEY:-dev-token-secret}
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY:-dev-api-key}
+      CENTRIFUGO_ADMIN_PASSWORD: ${CENTRIFUGO_ADMIN_PASSWORD:-dev-admin}
+      CENTRIFUGO_ADMIN_SECRET: ${CENTRIFUGO_ADMIN_SECRET:-dev-admin-secret}
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8000/health']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+
+volumes:
+  postgres_data:
+  redis_cache_data:
+  redis_queue_data:

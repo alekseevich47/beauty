@@ -1,0 +1,125 @@
+name: beauty-data
+
+services:
+  postgres:
+    build:
+      context: ../..
+      dockerfile: infra/docker/postgres.Dockerfile
+    image: beauty-postgres:17-3.5-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+      - ../postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: ['postgres', '-c', 'config_file=/etc/postgresql/postgresql.conf']
+    networks:
+      - data_net
+    # Bind only on WireGuard interface of the data VM
+    ports:
+      - '10.8.0.2:5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  redis-cache:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ['redis-server', '/usr/local/etc/redis/redis.conf']
+    volumes:
+      - ../redis/redis-cache.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_cache_data:/data
+    networks:
+      - data_net
+    ports:
+      - '10.8.0.2:6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  redis-queue:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ['redis-server', '/usr/local/etc/redis/redis.conf']
+    volumes:
+      - ../redis/redis-queue.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis_queue_data:/data
+    networks:
+      - data_net
+    ports:
+      - '10.8.0.2:6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  backup:
+    build:
+      context: ../backup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_BUCKET: ${S3_BACKUP_BUCKET}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: ${S3_REGION:-ru-central1}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX:-}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data:ro
+      - backup_data:/backups
+    networks:
+      - data_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Optional in-compose WireGuard; prefer host-level wg0 from infra/wireguard/*.example
+  wireguard:
+    image: linuxserver/wireguard:latest
+    profiles: ['wireguard']
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv4.ip_forward=1
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: Europe/Moscow
+    volumes:
+      - ../wireguard/data:/config
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - '51820:51820/udp'
+    network_mode: host
+
+networks:
+  data_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_cache_data:
+  redis_queue_data:
+  backup_data:

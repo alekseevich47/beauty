@@ -1,0 +1,68 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: traefik-app
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['10.8.0.1:8082']
+        labels:
+          vm: app
+
+  - job_name: traefik-admin
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['traefik:8082']
+        labels:
+          vm: adm
+
+  - job_name: centrifugo
+    static_configs:
+      - targets: ['10.8.0.1:8000']
+        labels:
+          service: centrifugo
+
+  - job_name: node-app
+    static_configs:
+      - targets: ['10.8.0.1:9100']
+        labels:
+          vm: app
+
+  - job_name: node-data
+    static_configs:
+      - targets: ['10.8.0.2:9100']
+        labels:
+          vm: data
+
+  - job_name: node-adm
+    static_configs:
+      - targets: ['10.8.0.3:9100']
+        labels:
+          vm: adm
+
+  - job_name: postgres
+    static_configs:
+      - targets: ['10.8.0.2:9187']
+        labels:
+          service: postgres
+
+  - job_name: redis-cache
+    static_configs:
+      - targets: ['10.8.0.2:9121']
+        labels:
+          service: redis-cache
+
+  - job_name: redis-queue
+    static_configs:
+      - targets: ['10.8.0.2:9122']
+        labels:
+          service: redis-queue
+
+  - job_name: otel-collector
+    static_configs:
+      - targets: ['otel-collector:8888']

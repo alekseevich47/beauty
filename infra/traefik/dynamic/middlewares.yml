@@ -1,0 +1,108 @@
+http:
+  middlewares:
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+        permissionsPolicy: 'camera=(), microphone=(), geolocation=(self)'
+        customResponseHeaders:
+          X-Powered-By: ''
+          Server: ''
+
+    compress:
+      compress: {}
+
+    # --- CSP ---
+    csp-miniapp:
+      headers:
+        contentSecurityPolicy: >-
+          default-src 'self';
+          script-src 'self';
+          style-src 'self' 'unsafe-inline';
+          img-src 'self' data: https: blob:;
+          font-src 'self' data:;
+          connect-src 'self' https://beauty.loomixx.ru wss://beauty.loomixx.ru https://telegram.org;
+          frame-ancestors https://web.telegram.org https://*.telegram.org https://max.ru https://*.max.ru;
+          base-uri 'self';
+          form-action 'self';
+          object-src 'none'
+
+    csp-widget:
+      headers:
+        contentSecurityPolicy: >-
+          default-src 'self';
+          script-src 'self';
+          style-src 'self' 'unsafe-inline';
+          img-src 'self' data: https:;
+          connect-src 'self' https://beauty.loomixx.ru;
+          frame-ancestors *;
+          base-uri 'self';
+          object-src 'none'
+
+    csp-admin:
+      headers:
+        contentSecurityPolicy: >-
+          default-src 'self';
+          script-src 'self';
+          style-src 'self' 'unsafe-inline';
+          img-src 'self' data: https:;
+          font-src 'self' data:;
+          connect-src 'self' https://beautyadm.loomixx.ru wss://beauty.loomixx.ru;
+          frame-ancestors 'none';
+          base-uri 'self';
+          form-action 'self';
+          object-src 'none'
+
+    # --- Rate limits ---
+    # Keyed on the real peer address via ipStrategy. Never key on a raw
+    # X-Forwarded-For header: a client can set it and would then control its own
+    # bucket, making the limit trivially bypassable.
+    api-ratelimit:
+      rateLimit:
+        average: 60
+        burst: 120
+        period: 1m
+        sourceCriterion:
+          ipStrategy:
+            depth: 0
+
+    widget-ratelimit:
+      rateLimit:
+        average: 30
+        burst: 60
+        period: 1m
+
+    centrifugo-ratelimit:
+      rateLimit:
+        average: 100
+        burst: 200
+        period: 1m
+
+    admin-ratelimit:
+      rateLimit:
+        average: 40
+        burst: 80
+        period: 1m
+
+    # --- IP allowlist for beautyadm.loomixx.ru ---
+    # Generated on the admin VM from ADMIN_ALLOWLIST_SOURCE_RANGE by
+    # infra/traefik/render-allowlist.sh, which the deploy workflow runs before
+    # `compose up`. This file holds the safe default: WireGuard mesh only.
+    admin-allowlist:
+      ipAllowList:
+        sourceRange:
+          - 10.8.0.0/24
+          - 127.0.0.1/32
+        ipStrategy:
+          depth: 0
+
+    prometheus-stripprefix:
+      stripPrefix:
+        prefixes:
+          - /prometheus

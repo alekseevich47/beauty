@@ -1,0 +1,45 @@
+@import '@beauty/ui/styles.css';
+@import 'tailwindcss';
+@import 'uplot/dist/uPlot.min.css';
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(232, 168, 124, 0.12), transparent 55%),
+      radial-gradient(900px 500px at 100% 0%, rgba(61, 214, 140, 0.06), transparent 50%),
+      linear-gradient(180deg, #121820 0%, var(--bp-bg) 40%, #0b1015 100%);
+    color: var(--bp-text);
+    font-family: var(--bp-font-body);
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+}
+
+@utility font-display {
+  font-family: var(--bp-font-display);
+}
+
+@utility safe-pb {
+  padding-bottom: calc(4.75rem + var(--safe-bottom));
+}
+
+@utility safe-pt {
+  padding-top: calc(0.75rem + var(--safe-top));
+}

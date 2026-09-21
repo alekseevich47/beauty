@@ -1,0 +1,17 @@
+# adm VM peer template (Address = 10.8.0.3/24)
+[Interface]
+Address = 10.8.0.3/24
+ListenPort = 51820
+PrivateKey = ADM_PRIVATE_KEY_REPLACE_ME
+
+[Peer]
+PublicKey = APP_PUBLIC_KEY_REPLACE_ME
+AllowedIPs = 10.8.0.1/32
+Endpoint = APP_PUBLIC_IP:51820
+PersistentKeepalive = 25
+
+[Peer]
+PublicKey = DATA_PUBLIC_KEY_REPLACE_ME
+AllowedIPs = 10.8.0.2/32
+Endpoint = DATA_PUBLIC_IP:51820
+PersistentKeepalive = 25

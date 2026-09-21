@@ -1,0 +1,52 @@
+# Traefik static config — App VM (beauty.loomixx.ru)
+api:
+  dashboard: false
+
+entryPoints:
+  web:
+    address: ':80'
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ':443'
+    http:
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - security-headers@file
+
+providers:
+  docker:
+    endpoint: unix:///var/run/docker.sock
+    exposedByDefault: false
+    network: beauty-app_app_net
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: ops@loomixx.ru
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web
+      # Prefer DNS challenge in production if Cloudflare token is set:
+      # dnsChallenge:
+      #   provider: cloudflare
+      #   delayBeforeCheck: 10
+
+log:
+  level: INFO
+
+accessLog: {}
+
+metrics:
+  prometheus:
+    entryPoint: websecure
+    addEntryPointsLabels: true
+    addServicesLabels: true

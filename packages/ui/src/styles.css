@@ -1,0 +1,26 @@
+:root {
+  --bp-bg: #0f1419;
+  --bp-surface: #1a222c;
+  --bp-surface-2: #243040;
+  --bp-text: #f4f1ec;
+  --bp-muted: #9aa5b5;
+  --bp-accent: #e8a87c;
+  --bp-accent-2: #c38d9e;
+  --bp-success: #3dd68c;
+  --bp-danger: #ff6b6b;
+  --bp-radius: 16px;
+  --bp-font-display: 'Fraunces', 'Georgia', serif;
+  --bp-font-body: 'Manrope', system-ui, sans-serif;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

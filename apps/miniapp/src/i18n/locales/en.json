@@ -1,0 +1,85 @@
+{
+  "brand": "Beauty+",
+  "nav": {
+    "appointments": "Bookings",
+    "bplus": "B+",
+    "favorites": "Favorites",
+    "feed": "Feed",
+    "schedule": "Schedule",
+    "profile": "Profile",
+    "more": "More"
+  },
+  "header": {
+    "notifications": "Notifications"
+  },
+  "greeting": {
+    "morning": "Good morning",
+    "day": "Good afternoon",
+    "evening": "Good evening",
+    "night": "Good night"
+  },
+  "feed": {
+    "city": "City",
+    "search": "Search services",
+    "masterOfWeek": "Master of the week",
+    "book": "Book",
+    "popular": "Popular services",
+    "all": "All",
+    "services": "Services",
+    "masters": "{{count}} masters",
+    "rating": "★ {{value}}"
+  },
+  "masterHome": {
+    "motivation": "Great day to grow — you're already {{percent}}% ahead of last week.",
+    "revenueToday": "Revenue today",
+    "revenueWeek": "Revenue this week",
+    "revenueMonth": "Revenue this month",
+    "upcoming": "Upcoming appointments",
+    "seeAll": "All",
+    "aiPlaceholder": "Ask AI about clients or schedule…",
+    "aiHint": "Long-press B+ to open AI"
+  },
+  "appointments": {
+    "title": "My bookings",
+    "empty": "No bookings yet",
+    "status": {
+      "pending": "Pending",
+      "confirmed": "Confirmed",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "no_show": "No-show"
+    }
+  },
+  "favorites": {
+    "title": "Favorites",
+    "empty": "Add masters to favorites"
+  },
+  "schedule": {
+    "title": "Schedule",
+    "empty": "No appointments today"
+  },
+  "profile": {
+    "title": "Profile",
+    "myAppointments": "My bookings",
+    "favorites": "Favorites",
+    "reviews": "Reviews",
+    "settings": "Settings",
+    "help": "Help",
+    "role": "Role",
+    "switchRole": "Switch role (demo)",
+    "tariff": "Plan"
+  },
+  "more": {
+    "title": "More",
+    "settings": "Master settings",
+    "subscription": "Subscription",
+    "broadcast": "Broadcasts",
+    "referrals": "Referral link",
+    "help": "Help"
+  },
+  "common": {
+    "rub": "{{amount}} ₽",
+    "min": "{{count}} min",
+    "demo": "Demo"
+  }
+}

@@ -1,0 +1,141 @@
+name: Deploy Admin
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy
+        required: false
+        default: latest
+  workflow_call:
+    inputs:
+      image_tag:
+        required: false
+        type: string
+        default: latest
+
+concurrency:
+  group: deploy-admin
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy admin VM (10.8.0.3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production-admin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ADM_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cat >> ~/.ssh/config <<EOF
+          Host adm
+            HostName ${{ secrets.ADM_HOST }}
+            User ${{ secrets.DEPLOY_USER }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking accept-new
+          EOF
+
+      - name: Require production env file
+        run: |
+          ssh adm 'bash -s' <<'EOF'
+          set -euo pipefail
+          if [ ! -f ~/beauty/infra/compose/.env.admin ]; then
+            echo "::error::infra/compose/.env.admin is missing on adm-vm."
+            echo "Create it from .env.admin.example with real secrets (chmod 600)."
+            echo "Refusing to deploy with example values."
+            exit 1
+          fi
+          EOF
+
+      - name: Sync infra tree
+        run: |
+          ssh adm 'mkdir -p ~/beauty/infra'
+          rsync -az --delete \
+            --exclude 'compose/.env.*' \
+            --exclude 'traefik/dynamic/admin-allowlist.yml' \
+            infra/compose \
+            infra/traefik \
+            infra/observability \
+            infra/docker \
+            adm:~/beauty/infra/
+
+      - name: Render admin IP allowlist
+        run: |
+          ssh adm 'bash -s' <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          chmod +x infra/traefik/render-allowlist.sh
+          infra/traefik/render-allowlist.sh infra/compose/.env.admin
+          EOF
+
+      - name: Registry login
+        run: |
+          ssh adm "docker login ghcr.io -u '${{ github.actor }}' --password-stdin" \
+            <<< '${{ secrets.GHCR_TOKEN }}'
+
+      - name: Deploy with health check and rollback
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          ssh adm "IMAGE_TAG='${IMAGE_TAG}' bash -s" <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          ENV_FILE=infra/compose/.env.admin
+          COMPOSE="docker compose -f infra/compose/docker-compose.admin.yml --env-file ${ENV_FILE}"
+
+          PREVIOUS_TAG="$(grep '^IMAGE_TAG=' "${ENV_FILE}" | cut -d= -f2- || true)"
+          PREVIOUS_TAG="${PREVIOUS_TAG:-latest}"
+          echo "Previous tag: ${PREVIOUS_TAG} -> new tag: ${IMAGE_TAG}"
+
+          set_tag() {
+            if grep -q '^IMAGE_TAG=' "${ENV_FILE}"; then
+              sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=$1|" "${ENV_FILE}"
+            else
+              echo "IMAGE_TAG=$1" >> "${ENV_FILE}"
+            fi
+          }
+
+          # The admin host is IP-restricted, so health is checked from inside the
+          # container network rather than over the public hostname.
+          health_ok() {
+            for i in $(seq 1 24); do
+              if ${COMPOSE} exec -T admin-api \
+                   wget -qO- "http://127.0.0.1:${API_PORT:-3001}/healthz" > /dev/null 2>&1; then
+                echo "Health check passed on attempt $i"
+                return 0
+              fi
+              echo "Health check attempt $i/24 failed; retrying"
+              sleep 5
+            done
+            return 1
+          }
+
+          set_tag "${IMAGE_TAG}"
+          ${COMPOSE} pull
+          ${COMPOSE} up -d --remove-orphans
+
+          if health_ok; then
+            ${COMPOSE} ps
+            echo "Deployment of ${IMAGE_TAG} succeeded"
+            exit 0
+          fi
+
+          echo "::error::Health check failed for ${IMAGE_TAG}; rolling back to ${PREVIOUS_TAG}"
+          ${COMPOSE} logs --tail 150 admin-api || true
+          set_tag "${PREVIOUS_TAG}"
+          ${COMPOSE} pull
+          ${COMPOSE} up -d --remove-orphans
+
+          if health_ok; then
+            echo "::error::Rolled back to ${PREVIOUS_TAG} successfully; deployment failed"
+          else
+            echo "::error::Rollback to ${PREVIOUS_TAG} is also unhealthy — manual intervention required"
+          fi
+          exit 1
+          EOF

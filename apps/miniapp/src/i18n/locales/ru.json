@@ -1,0 +1,85 @@
+{
+  "brand": "Beauty+",
+  "nav": {
+    "appointments": "Записи",
+    "bplus": "B+",
+    "favorites": "Избранное",
+    "feed": "Лента",
+    "schedule": "Расписание",
+    "profile": "Профиль",
+    "more": "Ещё"
+  },
+  "header": {
+    "notifications": "Уведомления"
+  },
+  "greeting": {
+    "morning": "Доброе утро",
+    "day": "Добрый день",
+    "evening": "Добрый вечер",
+    "night": "Доброй ночи"
+  },
+  "feed": {
+    "city": "Город",
+    "search": "Поиск услуг",
+    "masterOfWeek": "Мастер недели",
+    "book": "Записаться",
+    "popular": "Популярные услуги",
+    "all": "Все",
+    "services": "Услуги",
+    "masters": "{{count}} мастеров",
+    "rating": "★ {{value}}"
+  },
+  "masterHome": {
+    "motivation": "Сегодня отличный день для роста — вы уже на {{percent}}% впереди прошлой недели.",
+    "revenueToday": "Выручка сегодня",
+    "revenueWeek": "Выручка за неделю",
+    "revenueMonth": "Выручка за месяц",
+    "upcoming": "Ближайшие записи",
+    "seeAll": "Все",
+    "aiPlaceholder": "Спросите AI о клиентах или расписании…",
+    "aiHint": "Зажмите B+, чтобы открыть AI"
+  },
+  "appointments": {
+    "title": "Мои записи",
+    "empty": "Пока нет записей",
+    "status": {
+      "pending": "Ожидает",
+      "confirmed": "Подтверждена",
+      "completed": "Завершена",
+      "cancelled": "Отменена",
+      "no_show": "Неявка"
+    }
+  },
+  "favorites": {
+    "title": "Избранное",
+    "empty": "Добавьте мастеров в избранное"
+  },
+  "schedule": {
+    "title": "Расписание",
+    "empty": "На сегодня записей нет"
+  },
+  "profile": {
+    "title": "Профиль",
+    "myAppointments": "Мои записи",
+    "favorites": "Избранное",
+    "reviews": "Отзывы",
+    "settings": "Настройки",
+    "help": "Помощь",
+    "role": "Роль",
+    "switchRole": "Переключить роль (demo)",
+    "tariff": "Тариф"
+  },
+  "more": {
+    "title": "Ещё",
+    "settings": "Настройки мастера",
+    "subscription": "Подписка",
+    "broadcast": "Рассылки",
+    "referrals": "Реферальная ссылка",
+    "help": "Помощь"
+  },
+  "common": {
+    "rub": "{{amount}} ₽",
+    "min": "{{count}} мин",
+    "demo": "Demo"
+  }
+}

@@ -1,0 +1,201 @@
+name: beauty-app
+
+services:
+  traefik:
+    image: traefik:v3.3
+    restart: unless-stopped
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ../traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ../traefik/dynamic:/etc/traefik/dynamic:ro
+      - traefik_letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - app_net
+    environment:
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:-}
+    labels:
+      - traefik.enable=false
+
+  api:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      # Selects MiniAppModule; the staff contour runs only on the admin VM
+      API_CONTOUR: miniapp
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      API_PORT: ${API_PORT:-3000}
+      API_HOST: ${API_HOST:-0.0.0.0}
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-20}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL}
+      REDIS_QUEUE_URL: ${REDIS_QUEUE_URL}
+      JWT_ACCESS_PRIVATE_KEY: ${JWT_ACCESS_PRIVATE_KEY}
+      JWT_ACCESS_PUBLIC_KEY: ${JWT_ACCESS_PUBLIC_KEY}
+      JWT_ACCESS_TTL_SEC: ${JWT_ACCESS_TTL_SEC:-900}
+      JWT_REFRESH_TTL_SEC: ${JWT_REFRESH_TTL_SEC:-2592000}
+      INITDATA_MAX_AGE_SEC: ${INITDATA_MAX_AGE_SEC:-86400}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
+      MAX_PLATFORM_ENABLED: ${MAX_PLATFORM_ENABLED:-false}
+      STAFF_JWT_SECRET: ${STAFF_JWT_SECRET}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY}
+      PUBLIC_MINIAPP_URL: ${PUBLIC_MINIAPP_URL:-https://beauty.loomixx.ru}
+      PUBLIC_ADMIN_URL: ${PUBLIC_ADMIN_URL:-https://beautyadm.loomixx.ru}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-https://beauty.loomixx.ru/api/v1}
+      INTERNAL_API_URL: ${INTERNAL_API_URL:-https://beautyadm.loomixx.ru/api/v1}
+      CORS_MINIAPP_ORIGINS: ${CORS_MINIAPP_ORIGINS:-https://beauty.loomixx.ru}
+      CORS_ADMIN_ORIGINS: ${CORS_ADMIN_ORIGINS:-https://beautyadm.loomixx.ru}
+      WIDGET_DEFAULT_ALLOWED_ORIGINS: ${WIDGET_DEFAULT_ALLOWED_ORIGINS:-}
+      WIDGET_REQUIRE_ORIGIN: ${WIDGET_REQUIRE_ORIGIN:-true}
+      PAYMENTS_ENABLED: ${PAYMENTS_ENABLED:-false}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_WEBHOOK_SECRET: ${YOOKASSA_WEBHOOK_SECRET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-ru-central1}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
+      AI_PROVIDER: ${AI_PROVIDER:-noop}
+      YANDEX_GPT_API_KEY: ${YANDEX_GPT_API_KEY:-}
+      YANDEX_GPT_FOLDER_ID: ${YANDEX_GPT_FOLDER_ID:-}
+      GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
+      CENTRIFUGO_API_URL: ${CENTRIFUGO_API_URL:-http://centrifugo:8000/api}
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY}
+      CENTRIFUGO_TOKEN_SECRET: ${CENTRIFUGO_TOKEN_SECRET}
+      METRICS_TOKEN: ${METRICS_TOKEN}
+      SENTRY_DSN: ${SENTRY_DSN_API:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://10.8.0.3:4318}
+    networks:
+      - app_net
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      centrifugo:
+        condition: service_started
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=beauty-app_app_net
+      - traefik.http.routers.api.rule=Host(`beauty.loomixx.ru`) && PathPrefix(`/api`)
+      - traefik.http.routers.api.entrypoints=websecure
+      - traefik.http.routers.api.tls.certresolver=letsencrypt
+      - traefik.http.routers.api.middlewares=security-headers@file,api-ratelimit@file,compress@file
+      - traefik.http.services.api.loadbalancer.server.port=${API_PORT:-3000}
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1536M
+
+  worker:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      API_CONTOUR: worker
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL}
+      REDIS_QUEUE_URL: ${REDIS_QUEUE_URL}
+      JWT_ACCESS_PRIVATE_KEY: ${JWT_ACCESS_PRIVATE_KEY}
+      JWT_ACCESS_PUBLIC_KEY: ${JWT_ACCESS_PUBLIC_KEY}
+      STAFF_JWT_SECRET: ${STAFF_JWT_SECRET}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY}
+      CENTRIFUGO_API_URL: ${CENTRIFUGO_API_URL:-http://centrifugo:8000/api}
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY}
+      CENTRIFUGO_TOKEN_SECRET: ${CENTRIFUGO_TOKEN_SECRET}
+      AI_PROVIDER: ${AI_PROVIDER:-noop}
+      PAYMENTS_ENABLED: ${PAYMENTS_ENABLED:-false}
+      SENTRY_DSN: ${SENTRY_DSN_WORKER:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://10.8.0.3:4318}
+    networks:
+      - app_net
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      - api
+    # Keeps background fan-out from starving the request path on a 4 vCPU host
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+
+  miniapp:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/miniapp:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - app_net
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=beauty-app_app_net
+      - traefik.http.routers.miniapp.rule=Host(`beauty.loomixx.ru`) && !PathPrefix(`/api`) && !PathPrefix(`/widget`) && !PathPrefix(`/connection`) && !PathPrefix(`/centrifugo`)
+      - traefik.http.routers.miniapp.entrypoints=websecure
+      - traefik.http.routers.miniapp.tls.certresolver=letsencrypt
+      - traefik.http.routers.miniapp.middlewares=security-headers@file,csp-miniapp@file,compress@file
+      - traefik.http.services.miniapp.loadbalancer.server.port=80
+      - traefik.http.routers.miniapp.priority=1
+
+  widget:
+    image: ${REGISTRY}/${IMAGE_NAMESPACE}/widget:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    networks:
+      - app_net
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=beauty-app_app_net
+      - traefik.http.routers.widget.rule=Host(`beauty.loomixx.ru`) && PathPrefix(`/widget`)
+      - traefik.http.routers.widget.entrypoints=websecure
+      - traefik.http.routers.widget.tls.certresolver=letsencrypt
+      - traefik.http.routers.widget.middlewares=security-headers@file,csp-widget@file,widget-ratelimit@file,compress@file
+      - traefik.http.services.widget.loadbalancer.server.port=80
+      - traefik.http.routers.widget.priority=10
+
+  centrifugo:
+    image: centrifugo/centrifugo:v5
+    restart: unless-stopped
+    command: ['centrifugo', '-c', '/centrifugo/config.json']
+    volumes:
+      - ../centrifugo/config.json:/centrifugo/config.json:ro
+    environment:
+      # Must mirror CENTRIFUGO_TOKEN_SECRET given to the API, which signs the tokens
+      CENTRIFUGO_TOKEN_HMAC_SECRET_KEY: ${CENTRIFUGO_TOKEN_HMAC_SECRET_KEY}
+      CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY}
+      CENTRIFUGO_ADMIN_PASSWORD: ${CENTRIFUGO_ADMIN_PASSWORD}
+      CENTRIFUGO_ADMIN_SECRET: ${CENTRIFUGO_ADMIN_SECRET}
+      CENTRIFUGO_ALLOWED_ORIGINS: https://beauty.loomixx.ru,https://beautyadm.loomixx.ru
+    networks:
+      - app_net
+    # Server API for admin-api over WireGuard (not public)
+    ports:
+      - '10.8.0.1:8000:8000'
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=beauty-app_app_net
+      - traefik.http.routers.centrifugo.rule=Host(`beauty.loomixx.ru`) && (PathPrefix(`/connection`) || PathPrefix(`/centrifugo`))
+      - traefik.http.routers.centrifugo.entrypoints=websecure
+      - traefik.http.routers.centrifugo.tls.certresolver=letsencrypt
+      - traefik.http.routers.centrifugo.middlewares=security-headers@file,centrifugo-ratelimit@file
+      - traefik.http.services.centrifugo.loadbalancer.server.port=8000
+      - traefik.http.routers.centrifugo.priority=20
+
+networks:
+  app_net:
+    name: beauty-app_app_net
+    driver: bridge
+
+volumes:
+  traefik_letsencrypt:

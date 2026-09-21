@@ -1,0 +1,30 @@
+# WireGuard mesh — Beauty+ three VMs
+# Copy to /etc/wireguard/wg0.conf (or linuxserver/wireguard config) and replace keys.
+#
+#   app  = 10.8.0.1
+#   data = 10.8.0.2
+#   adm  = 10.8.0.3
+#
+# Generate keys: wg genkey | tee privatekey | wg pubkey > publickey
+
+[Interface]
+Address = 10.8.0.1/24
+ListenPort = 51820
+PrivateKey = APP_PRIVATE_KEY_REPLACE_ME
+# PostUp / PostDown for forwarding if this node routes between peers
+# PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT
+# PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT
+
+# data VM
+[Peer]
+PublicKey = DATA_PUBLIC_KEY_REPLACE_ME
+AllowedIPs = 10.8.0.2/32
+Endpoint = DATA_PUBLIC_IP:51820
+PersistentKeepalive = 25
+
+# adm VM
+[Peer]
+PublicKey = ADM_PUBLIC_KEY_REPLACE_ME
+AllowedIPs = 10.8.0.3/32
+Endpoint = ADM_PUBLIC_IP:51820
+PersistentKeepalive = 25

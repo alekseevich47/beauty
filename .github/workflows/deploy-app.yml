@@ -1,0 +1,130 @@
+name: Deploy App
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy
+        required: false
+        default: latest
+  workflow_call:
+    inputs:
+      image_tag:
+        required: false
+        type: string
+        default: latest
+
+concurrency:
+  group: deploy-app
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy app VM (10.8.0.1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production-app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.APP_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cat >> ~/.ssh/config <<EOF
+          Host app
+            HostName ${{ secrets.APP_HOST }}
+            User ${{ secrets.DEPLOY_USER }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking accept-new
+          EOF
+
+      - name: Require production env file
+        run: |
+          ssh app 'bash -s' <<'EOF'
+          set -euo pipefail
+          if [ ! -f ~/beauty/infra/compose/.env.app ]; then
+            echo "::error::infra/compose/.env.app is missing on app-vm."
+            echo "Create it from .env.app.example with real secrets (chmod 600)."
+            echo "Refusing to deploy with example values."
+            exit 1
+          fi
+          EOF
+
+      - name: Sync infra tree
+        run: |
+          ssh app 'mkdir -p ~/beauty/infra'
+          rsync -az --delete \
+            --exclude 'compose/.env.*' \
+            infra/compose \
+            infra/traefik \
+            infra/centrifugo \
+            infra/docker \
+            app:~/beauty/infra/
+
+      - name: Registry login
+        run: |
+          ssh app "docker login ghcr.io -u '${{ github.actor }}' --password-stdin" \
+            <<< '${{ secrets.GHCR_TOKEN }}'
+
+      - name: Deploy with health check and rollback
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          ssh app "IMAGE_TAG='${IMAGE_TAG}' bash -s" <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          ENV_FILE=infra/compose/.env.app
+          COMPOSE="docker compose -f infra/compose/docker-compose.app.yml --env-file ${ENV_FILE}"
+
+          # Remember the tag currently running so a failed rollout can be undone
+          PREVIOUS_TAG="$(grep '^IMAGE_TAG=' "${ENV_FILE}" | cut -d= -f2- || true)"
+          PREVIOUS_TAG="${PREVIOUS_TAG:-latest}"
+          echo "Previous tag: ${PREVIOUS_TAG} -> new tag: ${IMAGE_TAG}"
+
+          set_tag() {
+            if grep -q '^IMAGE_TAG=' "${ENV_FILE}"; then
+              sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=$1|" "${ENV_FILE}"
+            else
+              echo "IMAGE_TAG=$1" >> "${ENV_FILE}"
+            fi
+          }
+
+          health_ok() {
+            for i in $(seq 1 24); do
+              if curl -fsS --max-time 5 https://beauty.loomixx.ru/healthz > /dev/null \
+                 && curl -fsS --max-time 5 https://beauty.loomixx.ru/readyz > /dev/null; then
+                echo "Health check passed on attempt $i"
+                return 0
+              fi
+              echo "Health check attempt $i/24 failed; retrying"
+              sleep 5
+            done
+            return 1
+          }
+
+          set_tag "${IMAGE_TAG}"
+          ${COMPOSE} pull
+          ${COMPOSE} up -d --remove-orphans
+
+          if health_ok; then
+            ${COMPOSE} ps
+            echo "Deployment of ${IMAGE_TAG} succeeded"
+            exit 0
+          fi
+
+          echo "::error::Health check failed for ${IMAGE_TAG}; rolling back to ${PREVIOUS_TAG}"
+          ${COMPOSE} logs --tail 150 api worker || true
+          set_tag "${PREVIOUS_TAG}"
+          ${COMPOSE} pull
+          ${COMPOSE} up -d --remove-orphans
+
+          if health_ok; then
+            echo "::error::Rolled back to ${PREVIOUS_TAG} successfully; deployment failed"
+          else
+            echo "::error::Rollback to ${PREVIOUS_TAG} is also unhealthy — manual intervention required"
+          fi
+          exit 1
+          EOF

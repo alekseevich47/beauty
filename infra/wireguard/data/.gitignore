@@ -1,0 +1,4 @@
+# Runtime WireGuard peer configs (private keys) — never commit
+*
+!.gitignore
+!*.example

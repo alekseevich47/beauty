@@ -1,0 +1,115 @@
+name: Migrate
+
+# Runs versioned Drizzle migrations against data-vm, always after a fresh backup.
+on:
+  workflow_dispatch:
+    inputs:
+      skip_backup:
+        description: 'Only for the first bootstrap, when the database is empty'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      skip_backup:
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Run DB migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-data
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DATA_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cat >> ~/.ssh/config <<EOF
+          Host data
+            HostName ${{ secrets.DATA_HOST }}
+            User ${{ secrets.DEPLOY_USER }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking accept-new
+          EOF
+
+      - name: Require production env file
+        run: |
+          ssh data 'bash -s' <<'EOF'
+          set -euo pipefail
+          if [ ! -f ~/beauty/infra/compose/.env.data ]; then
+            echo "::error::infra/compose/.env.data missing on data-vm; run deploy-data first"
+            exit 1
+          fi
+          EOF
+
+      - name: Pre-migration backup
+        if: ${{ !inputs.skip_backup }}
+        run: |
+          ssh data 'bash -s' <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          COMPOSE="docker compose -f infra/compose/docker-compose.data.yml --env-file infra/compose/.env.data"
+          echo "Taking a pre-migration backup; migrations do not start without it."
+          ${COMPOSE} run --rm backup /backup/backup.sh
+          EOF
+
+      - name: Sync migration sources
+        run: |
+          ssh data 'mkdir -p ~/beauty'
+          rsync -az --delete \
+            package.json pnpm-workspace.yaml pnpm-lock.yaml .nvmrc tsconfig.base.json \
+            data:~/beauty/
+          rsync -az --delete packages data:~/beauty/
+
+      - name: Apply migrations
+        run: |
+          ssh data 'bash -s' <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          set -a
+          # shellcheck disable=SC1091
+          source infra/compose/.env.data
+          set +a
+
+          # Migrations are the only DDL path and run as the migration superuser from
+          # .env.data; runtime services connect with least-privilege roles instead.
+          docker run --rm \
+            --network beauty-data_data_net \
+            -e DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}" \
+            -v "$HOME/beauty:/workspace" \
+            -w /workspace \
+            node:22-alpine \
+            sh -c 'corepack enable \
+              && corepack prepare pnpm@9.15.0 --activate \
+              && pnpm install --frozen-lockfile --filter @beauty/db... \
+              && pnpm --filter @beauty/db build \
+              && pnpm --filter @beauty/db migrate'
+          EOF
+
+      - name: Verify migrations are applied
+        run: |
+          ssh data 'bash -s' <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          set -a
+          # shellcheck disable=SC1091
+          source infra/compose/.env.data
+          set +a
+          COMPOSE="docker compose -f infra/compose/docker-compose.data.yml --env-file infra/compose/.env.data"
+          # The exclusion constraint is the load-bearing invariant against double booking
+          ${COMPOSE} exec -T postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc \
+            "select count(*) from pg_constraint where conname = 'appointments_no_overlap'" \
+            | grep -q '^1$' || { echo "::error::appointments_no_overlap constraint missing"; exit 1; }
+          echo "Schema invariants verified"
+          EOF

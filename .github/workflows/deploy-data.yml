@@ -1,0 +1,136 @@
+name: Deploy Data
+
+# Touches stateful services (Postgres, Redis), so it is deliberately separate from
+# the app/admin rollouts and refuses to run without a recent verified backup.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to deploy
+        required: false
+        default: main
+      skip_backup_check:
+        description: 'Only for the very first bootstrap, when no backup exists yet'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to deploy
+        required: false
+        type: string
+        default: main
+      skip_backup_check:
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-data
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy data VM (10.8.0.2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-data
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DATA_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cat >> ~/.ssh/config <<EOF
+          Host data
+            HostName ${{ secrets.DATA_HOST }}
+            User ${{ secrets.DEPLOY_USER }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking accept-new
+          EOF
+
+      - name: Require production env file
+        run: |
+          ssh data 'bash -s' <<'EOF'
+          set -euo pipefail
+          if [ ! -f ~/beauty/infra/compose/.env.data ]; then
+            echo "::error::infra/compose/.env.data is missing on data-vm."
+            echo "Create it from .env.data.example with real secrets (chmod 600)."
+            echo "Refusing to boot the database with example values."
+            exit 1
+          fi
+          EOF
+
+      - name: Require fresh backup
+        if: ${{ !inputs.skip_backup_check }}
+        run: |
+          ssh data 'bash -s' <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          if [ ! -x infra/backup/backup.sh ]; then
+            echo "::error::infra/backup/backup.sh not present; cannot verify backup age"
+            exit 1
+          fi
+          # backup.sh --latest-age prints the age of the newest backup in seconds
+          AGE="$(infra/backup/backup.sh --latest-age 2>/dev/null || echo 999999999)"
+          MAX=$((26 * 3600))
+          echo "Newest backup is ${AGE}s old (limit ${MAX}s)"
+          if [ "${AGE}" -gt "${MAX}" ]; then
+            echo "::error::No backup newer than 26h. Run a full backup before touching the data VM."
+            exit 1
+          fi
+          EOF
+
+      - name: Sync infra tree
+        run: |
+          ssh data 'mkdir -p ~/beauty/infra'
+          rsync -az --delete \
+            --exclude 'wireguard/data/' \
+            --exclude 'compose/.env.*' \
+            infra/compose \
+            infra/postgres \
+            infra/redis \
+            infra/backup \
+            infra/docker \
+            infra/wireguard \
+            data:~/beauty/infra/
+
+      - name: Compose up
+        run: |
+          ssh data 'bash -s' <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          docker compose \
+            -f infra/compose/docker-compose.data.yml \
+            --env-file infra/compose/.env.data \
+            up -d --remove-orphans --build
+          EOF
+
+      - name: Wait for healthy Postgres and Redis
+        run: |
+          ssh data 'bash -s' <<'EOF'
+          set -euo pipefail
+          cd ~/beauty
+          COMPOSE="docker compose -f infra/compose/docker-compose.data.yml --env-file infra/compose/.env.data"
+          for i in $(seq 1 30); do
+            UNHEALTHY="$(${COMPOSE} ps --format '{{.Service}} {{.Health}}' \
+              | awk '$2 != "healthy" && $2 != "" { print $1 }' | tr '\n' ' ')"
+            if [ -z "${UNHEALTHY}" ]; then
+              echo "All data services healthy"
+              ${COMPOSE} ps
+              exit 0
+            fi
+            echo "Waiting for: ${UNHEALTHY} (attempt ${i}/30)"
+            sleep 10
+          done
+          echo "::error::Data services did not become healthy"
+          ${COMPOSE} ps
+          ${COMPOSE} logs --tail 100
+          exit 1
+          EOF

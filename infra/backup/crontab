@@ -1,0 +1,2 @@
+# Daily 03:15 Europe/Moscow (container TZ)
+15 3 * * * /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1

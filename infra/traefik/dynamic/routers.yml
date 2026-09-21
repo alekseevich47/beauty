@@ -1,0 +1,4 @@
+# Optional static routers (most routing is Docker labels).
+# Kept for TLS options / catch-alls shared across VMs.
+http:
+  routers: {}

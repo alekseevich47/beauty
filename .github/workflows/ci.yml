@@ -1,0 +1,222 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  quality:
+    name: Lint · Typecheck · Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  migrations:
+    name: Migrations · Schema invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      redis-cache:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis-queue:
+        image: redis:7.4-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://beauty:beauty@localhost:5432/beauty_test
+      REDIS_CACHE_URL: redis://localhost:6379/0
+      REDIS_QUEUE_URL: redis://localhost:6380/0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install psql client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      # Built from the same Dockerfile the data VM uses, so CI proves that PostGIS
+      # and pgvector really are both present before a migration relies on them.
+      - name: Build and start Postgres (PostGIS + pgvector)
+        run: |
+          set -euo pipefail
+          docker build -f infra/docker/postgres.Dockerfile -t beauty-postgres:ci .
+          docker run -d --name beauty-pg \
+            -e POSTGRES_DB=beauty_test \
+            -e POSTGRES_USER=beauty \
+            -e POSTGRES_PASSWORD=beauty \
+            -p 5432:5432 \
+            -v "$PWD/infra/postgres/init:/docker-entrypoint-initdb.d:ro" \
+            beauty-postgres:ci
+          for i in $(seq 1 30); do
+            if docker exec beauty-pg pg_isready -U beauty -d beauty_test > /dev/null 2>&1; then
+              echo "Postgres ready"; break
+            fi
+            sleep 3
+          done
+          docker exec beauty-pg psql -U beauty -d beauty_test -c "select extname from pg_extension"
+
+      - name: Apply migrations
+        run: pnpm db:migrate
+
+      - name: Seed
+        run: pnpm db:seed
+
+      - name: Assert schema invariants
+        env:
+          PGPASSWORD: beauty
+        run: |
+          set -euo pipefail
+          psql -h localhost -U beauty -d beauty_test -tAc \
+            "select count(*) from pg_constraint where conname = 'appointments_no_overlap'" \
+            | grep -qx 1 || { echo "::error::double-booking exclusion constraint missing"; exit 1; }
+          psql -h localhost -U beauty -d beauty_test -tAc \
+            "select count(*) from pg_matviews where matviewname = 'mv_master_revenue_day'" \
+            | grep -qx 1 || { echo "::error::revenue materialized view missing"; exit 1; }
+          psql -h localhost -U beauty -d beauty_test -tAc \
+            "select count(*) from permissions" | grep -qv '^0$' \
+            || { echo "::error::seed did not create permissions"; exit 1; }
+
+      - name: Detect uncommitted schema drift
+        run: |
+          pnpm --filter @beauty/db exec drizzle-kit generate --name drift_check
+          if git status --porcelain packages/db/drizzle | grep -q .; then
+            echo "::error::Schema changed without a committed migration. Run pnpm db:generate."
+            git status --porcelain packages/db/drizzle
+            exit 1
+          fi
+
+  supply-chain:
+    name: Audit · Secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image-scan:
+    name: Trivy image scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          push: false
+          load: true
+          tags: beauty-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: beauty-api:ci
+          format: sarif
+          output: trivy-api.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-api.sarif
