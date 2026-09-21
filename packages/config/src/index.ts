@@ -143,10 +143,16 @@ let cached: Env | undefined;
 /**
  * Validates process.env once and fails fast.
  * Never read process.env directly outside this package.
+ * Empty strings from Docker Compose (`${VAR:-}`) are treated as unset so
+ * optional URL/string fields do not fail Zod with "Invalid url".
  */
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   if (cached) return cached;
-  const parsed = envSchema.safeParse(source);
+  const normalized: NodeJS.ProcessEnv = { ...source };
+  for (const [key, value] of Object.entries(normalized)) {
+    if (value === '') delete normalized[key];
+  }
+  const parsed = envSchema.safeParse(normalized);
   if (!parsed.success) {
     const details = parsed.error.issues
       .map((i) => `  - ${i.path.join('.')}: ${i.message}`)

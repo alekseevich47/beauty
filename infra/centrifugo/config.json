@@ -27,7 +27,8 @@
       "presence": true,
       "join_leave": true,
       "history_size": 200,
-      "history_ttl": "2160h",
+      "history_ttl": "720h",
+      "history_meta_ttl": "2160h",
       "force_recovery": true,
       "allow_subscribe_for_client": false,
       "allow_publish_for_client": false

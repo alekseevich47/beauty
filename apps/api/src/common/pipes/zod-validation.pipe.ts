@@ -1,9 +1,17 @@
-import { ArgumentMetadata, BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
+import {
+  ArgumentMetadata,
+  BadRequestException,
+  Injectable,
+  Optional,
+  PipeTransform,
+} from '@nestjs/common';
 import type { ZodTypeAny } from 'zod';
 
 @Injectable()
 export class ZodValidationPipe implements PipeTransform {
-  constructor(private readonly schema?: ZodTypeAny) {}
+  // Global APP_PIPE registration has no schema provider; Nest would otherwise
+  // try to inject `Object` for ZodTypeAny and fail DI at boot.
+  constructor(@Optional() private readonly schema?: ZodTypeAny) {}
 
   transform(value: unknown, metadata: ArgumentMetadata): unknown {
     const metatype = metadata.metatype as

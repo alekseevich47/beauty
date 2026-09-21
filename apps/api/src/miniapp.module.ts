@@ -56,7 +56,7 @@ import { RealtimeModule } from './common/realtime/realtime.module';
   ],
   providers: [
     PinoLogger,
-    { provide: APP_PIPE, useClass: ZodValidationPipe },
+    { provide: APP_PIPE, useFactory: () => new ZodValidationPipe() },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: MiniAppAuthGuard },
   ],
