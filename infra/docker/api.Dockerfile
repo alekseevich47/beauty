@@ -11,11 +11,18 @@ RUN pnpm install --frozen-lockfile --filter @beauty/api...
 
 FROM deps AS build
 COPY apps/api ./apps/api
-# pnpm deploy omits gitignored paths (dist/), so copy the build output explicitly.
-RUN pnpm --filter @beauty/api... build \
+# Host *.tsbuildinfo must not skip emit: dist/ is dockerignored, so incremental
+# would report "up to date" while leaving the image without JS output.
+RUN find apps/api packages -name '*.tsbuildinfo' -delete \
+  && pnpm --filter @beauty/api... build \
+  && test -f apps/api/dist/main.js \
+  && test -f apps/api/dist/worker.js \
+  && cp -a apps/api/dist /tmp/api-dist \
   && pnpm deploy --filter=@beauty/api --prod /out \
-  && cp -a apps/api/dist /out/dist \
-  && test -f /out/dist/main.js
+  && rm -rf /out/dist \
+  && cp -a /tmp/api-dist /out/dist \
+  && test -f /out/dist/main.js \
+  && test -f /out/dist/worker.js
 
 FROM node:22-alpine AS runner
 ENV NODE_ENV=production

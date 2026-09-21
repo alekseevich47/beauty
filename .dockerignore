@@ -1,0 +1,17 @@
+.git
+.github
+.cursor
+.turbo
+.husky
+graphify-out
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+!**/.env.*.example
+**/coverage
+**/.vite
+docs
+*.md
+!README.md
