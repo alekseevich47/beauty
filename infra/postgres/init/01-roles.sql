@@ -6,8 +6,8 @@
 --   ALTER ROLE beauty_api_internal WITH PASSWORD '<from secret store>';
 --   ALTER ROLE beauty_worker       WITH PASSWORD '<from secret store>';
 --
--- The migration role is the POSTGRES_USER superuser from .env.data and is used
--- only by the migrate workflow.
+-- The migration role is the POSTGRES_USER superuser from .env.data
+-- (`beauty_admin`) and is used only by the migrate workflow.
 --
 -- A read-only role for ad-hoc inspection, with no password until ops sets one.
 DO $$

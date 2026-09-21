@@ -47,6 +47,56 @@ Add 2 GB swap on every host. Prefer RF regions for 152-FZ.
 
 No public DNS for data-vm. Optional AAAA if you enable IPv6.
 
+## Home lab (Proxmox, single public IP)
+
+How the setup differs when all three VMs run on a home hypervisor behind one public address.
+
+| VM     | LAN             | WireGuard  | Role    |
+| ------ | --------------- | ---------- | ------- |
+| `bapp` | `192.168.0.166` | `10.8.0.1` | app-vm  |
+| `bdb`  | `192.168.0.167` | `10.8.0.2` | data-vm |
+| `badm` | `192.168.0.168` | `10.8.0.3` | adm-vm  |
+
+The router keeps forwarding 80/443 to the pre-existing front end at `192.168.0.51`,
+which splits traffic by hostname — so Traefik on both VMs still issues its own
+Let's Encrypt certificates.
+
+HTTPS goes through `stream` + SNI (`/etc/nginx/stream.d/sni-beauty.conf`); the older
+`listen 443 ssl` servers on `.51` move to `127.0.0.1:8443`:
+
+```nginx
+map $ssl_preread_server_name $https_backend {
+  beauty.loomixx.ru     192.168.0.166:443;
+  beautyadm.loomixx.ru  192.168.0.168:443;
+  default               127.0.0.1:8443;
+}
+
+server {
+  listen 443;
+  listen [::]:443;
+  proxy_pass $https_backend;
+  ssl_preread on;
+  proxy_connect_timeout 5s;
+  proxy_timeout 600s;
+}
+```
+
+Port 80 is a plain `Host`-based `proxy_pass` to `192.168.0.166:80` / `192.168.0.168:80`
+so ACME HTTP-01 still reaches Traefik.
+
+Other home-lab specifics:
+
+- Traefik runs on the **file provider** only (`infra/traefik/routers-app.yml`,
+  `routers-admin.yml`), without `docker.sock`: Docker Engine 29 no longer serves API
+  1.24 and the docker provider fails on the version check. A router file with no
+  `http` section also fails startup — delete such files instead of leaving stubs.
+- Redis on data-vm binds the WireGuard address, so its config needs `protected-mode no`;
+  otherwise clients get `DENIED Redis is running in protected mode`.
+- `.env.data` exists only on data-vm, `.env.app` on app-vm, `.env.admin` on adm-vm.
+  Running `docker compose --env-file .env.data` from another VM fails with
+  `couldn't find env file`.
+- Never forward `5432`, `6379`, `6380`, Proxmox or Grafana to the internet.
+
 ## Prerequisites (all VMs)
 
 ```bash
@@ -161,8 +211,16 @@ docker compose -f infra/compose/docker-compose.data.yml --env-file infra/compose
    ALTER ROLE beauty_worker       WITH PASSWORD '...';"
 ```
 
-Only the `POSTGRES_USER` superuser runs migrations; the runtime roles hold DML rights
-only, so a compromised API container cannot alter the schema.
+Only the `POSTGRES_USER` superuser — `beauty_admin`, while the database itself stays
+`beauty` — runs migrations; the runtime roles hold DML rights only, so a compromised
+API container cannot alter the schema.
+
+Ad-hoc queries from data-vm use the same superuser:
+
+```bash
+docker compose -f infra/compose/docker-compose.data.yml --env-file .env.data \
+  exec -T postgres psql -U beauty_admin -d beauty -tAc 'select 1'
+```
 
 ## First bootstrap order
 
@@ -188,7 +246,7 @@ Run `migrate.yml`, which takes a backup first, applies the versioned migrations 
 equivalent from a host on the WireGuard mesh:
 
 ```bash
-export DATABASE_URL='postgresql://<superuser>:...@10.8.0.2:5432/beauty'
+export DATABASE_URL='postgresql://beauty_admin:...@10.8.0.2:5432/beauty'
 pnpm install --frozen-lockfile
 pnpm db:migrate   # drizzle migrator, journal order
 pnpm db:seed      # permissions, roles, tariffs, categories, demo city
@@ -228,9 +286,48 @@ lost, the container would serve the mini-app API on the staff host — the compo
 sets it explicitly for that reason.
 
 Create the first staff admin after seeding: insert a `staff_users` row with an
-Argon2id hash, attach the `admin` role via `staff_user_roles`, then complete TOTP
-enrollment on first login (`POST /api/v1/staff/users/:id/totp-reset` returns the
-`otpauth://` URI for an authenticator app).
+Argon2id hash and attach the `admin` role via `staff_user_roles`.
+
+That account's TOTP has to be provisioned by hand. `POST /api/v1/staff/users/:id/totp-reset`
+requires the `staff.manage` permission — hence an existing staff session — while
+`loginStep1` rejects the login with `TOTP_REQUIRED_SETUP` as long as
+`staff_users.totp_enabled = false`, so the first secret is written outside the API:
+
+```bash
+# 1. adm-vm: generate a secret and encrypt it with the API's TOTP_ENCRYPTION_KEY
+docker compose -f infra/compose/docker-compose.admin.yml --env-file .env.admin exec -T admin-api \
+  node -e "
+const { authenticator } = require('otplib');
+const { createCipheriv, randomBytes } = require('crypto');
+const email = process.argv[1];
+const secret = authenticator.generateSecret();
+const iv = randomBytes(12);
+const cipher = createCipheriv('aes-256-gcm', Buffer.from(process.env.TOTP_ENCRYPTION_KEY, 'base64'), iv);
+const ct = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+const enc = ['v1', iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), ct.toString('base64url')].join('.');
+console.log(JSON.stringify({ otpauth: authenticator.keyuri(email, 'Beauty+', secret), enc }, null, 2));
+" staff@example.com
+```
+
+The envelope format (`v1.<iv>.<tag>.<ciphertext>`, base64url, AES-256-GCM) comes from
+`apps/api/src/common/guards/staff-auth.guard.ts`; a secret stored any other way will
+not decrypt.
+
+```bash
+# 2. data-vm: store the secret and enable TOTP
+docker compose -f infra/compose/docker-compose.data.yml --env-file .env.data exec -T postgres \
+  psql -U beauty_admin -d beauty -v enc="'<enc>'" -v email="'staff@example.com'" <<'SQL'
+INSERT INTO staff_totp_secrets (staff_user_id, secret_encrypted, verified_at)
+SELECT id, :enc, now() FROM staff_users WHERE email = :email
+ON CONFLICT (staff_user_id) DO UPDATE
+  SET secret_encrypted = EXCLUDED.secret_encrypted, verified_at = now();
+
+UPDATE staff_users SET totp_enabled = true, updated_at = now() WHERE email = :email;
+SQL
+```
+
+Add the `otpauth://` URI to an authenticator app and log in normally. From then on
+staff TOTP resets go through `totp-reset` in the admin UI.
 
 ## Routing map
 

@@ -32,7 +32,7 @@ alwaysApply: true
 - Path-based routing на том же staff-хосте (без отдельного `internal-api.*`):
   - `beauty.loomixx.ru/api/v1` — mini-app (см. `stack_app.md`)
   - `beautyadm.loomixx.ru/api/v1` — staff (admin/support)
-- Общая PostgreSQL на **data-vm** (`10.8.0.2`), доступ только по WireGuard; **отдельные таблицы** staff и mini-app users.
+- Общая PostgreSQL на **data-vm** (`10.8.0.2`), доступ только по WireGuard; **отдельные таблицы** staff и mini-app users. Admin API подключается ролью `beauty_api_internal`, миграции — суперпользователем `beauty_admin`.
 - Real-time чат поддержки: **Centrifugo** на app-vm (`/rt`); каналы staff ↔ master.
 - Три VM: app / data / adm — см. `docs/DEPLOYMENT.md`.
 
@@ -41,6 +41,8 @@ alwaysApply: true
 - Email + пароль + **обязательный 2FA (TOTP)**.
 - Собственные JWT/сессии (httpOnly cookie), пул токенов **независим** от mini-app JWT.
 - Нет входа через Telegram/MAX для сотрудников.
+- `staff_users.totp_enabled = false` блокирует вход ещё на шаге пароля (`TOTP_REQUIRED_SETUP`), а `totp-reset` требует permission `staff.manage`. Поэтому первому админу секрет заводят вручную — процедура в `docs/DEPLOYMENT.md`.
+- Секреты TOTP лежат в `staff_totp_secrets` в конверте `v1.<iv>.<tag>.<ciphertext>` (AES-256-GCM, ключ `TOTP_ENCRYPTION_KEY`); формат менять только вместе с миграцией существующих строк.
 
 ### RBAC model
 

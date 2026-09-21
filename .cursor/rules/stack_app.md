@@ -71,7 +71,7 @@ Beauty+ — mini-app в Telegram и MAX + CRM для beauty-индустрии.
 
 ### Data
 
-- **PostgreSQL** — основная БД (CRM-модель).
+- **PostgreSQL** — основная БД (CRM-модель), имя базы `beauty`. Суперпользователь миграций — `beauty_admin` (`POSTGRES_USER` в `.env.data`); сервисы ходят под DML-ролями `beauty_api_miniapp`, `beauty_api_internal`, `beauty_worker`.
 - **PostGIS** — гео («мастера рядом», город).
 - **Redis** — кэш, rate limit, очереди, счётчики.
 - **S3-compatible** (Yandex Object Storage / VK Cloud / MinIO) — фото, аватары, баннеры.

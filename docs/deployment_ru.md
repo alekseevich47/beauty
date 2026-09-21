@@ -47,6 +47,46 @@ app-vm / adm-vm ──WireGuard──→ data-vm:5432 / :6379 / :6380
 
 Публичного DNS для data-vm нет. Опционально AAAA, если включаете IPv6.
 
+## Домашний лаб (Proxmox, один публичный IP)
+
+Отличия от облачной топологии, если все три ВМ живут на домашнем гипервизоре за одним белым IP.
+
+| ВМ     | LAN             | WireGuard  | Роль    |
+| ------ | --------------- | ---------- | ------- |
+| `bapp` | `192.168.0.166` | `10.8.0.1` | app-vm  |
+| `bdb`  | `192.168.0.167` | `10.8.0.2` | data-vm |
+| `badm` | `192.168.0.168` | `10.8.0.3` | adm-vm  |
+
+На роутере 80/443 остаются проброшены на уже существующий фронт `192.168.0.51`; он разводит трафик по имени домена, поэтому Traefik на обеих ВМ по-прежнему сам выпускает сертификаты Let's Encrypt.
+
+HTTPS — `stream` + SNI (`/etc/nginx/stream.d/sni-beauty.conf`), старые `listen 443 ssl` на `.51` переводятся на `127.0.0.1:8443`:
+
+```nginx
+map $ssl_preread_server_name $https_backend {
+  beauty.loomixx.ru     192.168.0.166:443;
+  beautyadm.loomixx.ru  192.168.0.168:443;
+  default               127.0.0.1:8443;
+}
+
+server {
+  listen 443;
+  listen [::]:443;
+  proxy_pass $https_backend;
+  ssl_preread on;
+  proxy_connect_timeout 5s;
+  proxy_timeout 600s;
+}
+```
+
+HTTP (80) — обычный `proxy_pass` по `Host` на `192.168.0.166:80` / `192.168.0.168:80`, чтобы проходил ACME HTTP-01.
+
+Прочие отличия домашнего стенда:
+
+- Traefik работает только с **file-провайдером** (`infra/traefik/routers-app.yml`, `routers-admin.yml`), без `docker.sock`: Docker Engine 29 больше не отдаёт API 1.24, и docker-провайдер падает с ошибкой версии. Пустой файл-роутер без секции `http` тоже валит Traefik — такие файлы удаляйте, а не оставляйте заготовкой.
+- Redis на data-vm слушает адрес WireGuard, поэтому в конфиге нужен `protected-mode no` — иначе клиенты получают `DENIED Redis is running in protected mode`.
+- `.env.data` лежит только на data-vm, `.env.app` — на app-vm, `.env.admin` — на adm-vm. Команды `docker compose --env-file .env.data` с других ВМ падают с `couldn't find env file`.
+- Порты `5432`, `6379`, `6380`, Proxmox и Grafana наружу не пробрасываются никогда.
+
 ## Предварительные требования (все ВМ)
 
 ```bash
@@ -152,7 +192,14 @@ docker compose -f infra/compose/docker-compose.data.yml --env-file infra/compose
    ALTER ROLE beauty_worker       WITH PASSWORD '...';"
 ```
 
-Миграции выполняет только суперпользователь `POSTGRES_USER`; рантайм-роли имеют лишь права DML, поэтому скомпрометированный контейнер API не может менять схему.
+Миграции выполняет только суперпользователь `POSTGRES_USER` — это `beauty_admin` (имя БД остаётся `beauty`). Рантайм-роли имеют лишь права DML, поэтому скомпрометированный контейнер API не может менять схему.
+
+Ручные запросы к БД с data-vm идут от того же суперпользователя:
+
+```bash
+docker compose -f infra/compose/docker-compose.data.yml --env-file .env.data \
+  exec -T postgres psql -U beauty_admin -d beauty -tAc 'select 1'
+```
 
 ## Порядок первого бутстрапа
 
@@ -176,7 +223,7 @@ docker compose -f infra/compose/docker-compose.data.yml ps
 Запустите `migrate.yml`: он сначала делает бэкап, затем применяет версионированные миграции из `packages/db/drizzle` и проверяет, что констрейнт против двойного бронирования на месте. Ручной эквивалент с хоста в сети WireGuard:
 
 ```bash
-export DATABASE_URL='postgresql://<superuser>:...@10.8.0.2:5432/beauty'
+export DATABASE_URL='postgresql://beauty_admin:...@10.8.0.2:5432/beauty'
 pnpm install --frozen-lockfile
 pnpm db:migrate   # drizzle-мигратор, порядок из журнала
 pnpm db:seed      # permissions, roles, тарифы, категории, демо-город
@@ -209,7 +256,42 @@ curl -fsS https://beautyadm.loomixx.ru/healthz
 
 Admin API запускается с `API_CONTOUR=internal` — это поднимает `InternalModule` и глобально навешивает `StaffAuthGuard` и `PermissionsGuard`. Если переменную потерять, контейнер отдал бы mini-app API на staff-хосте, поэтому compose задаёт её явно.
 
-Первого staff-админа создайте после seed: вставьте строку в `staff_users` с Argon2id-хэшем, привяжите роль `admin` через `staff_user_roles`, затем пройдите enrollment TOTP при первом входе (`POST /api/v1/staff/users/:id/totp-reset` вернёт `otpauth://`-ссылку для приложения-аутентификатора).
+Первого staff-админа создайте после seed: вставьте строку в `staff_users` с Argon2id-хэшем и привяжите роль `admin` через `staff_user_roles`.
+
+TOTP для него нужно завести вручную. `POST /api/v1/staff/users/:id/totp-reset` требует permission `staff.manage`, то есть уже активной staff-сессии, а `loginStep1` отбивает вход с `TOTP_REQUIRED_SETUP`, пока `staff_users.totp_enabled = false` — поэтому первый секрет создаётся в обход API:
+
+```bash
+# 1. adm-vm: сгенерировать секрет и зашифровать его тем же TOTP_ENCRYPTION_KEY, что у API
+docker compose -f infra/compose/docker-compose.admin.yml --env-file .env.admin exec -T admin-api \
+  node -e "
+const { authenticator } = require('otplib');
+const { createCipheriv, randomBytes } = require('crypto');
+const email = process.argv[1];
+const secret = authenticator.generateSecret();
+const iv = randomBytes(12);
+const cipher = createCipheriv('aes-256-gcm', Buffer.from(process.env.TOTP_ENCRYPTION_KEY, 'base64'), iv);
+const ct = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+const enc = ['v1', iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), ct.toString('base64url')].join('.');
+console.log(JSON.stringify({ otpauth: authenticator.keyuri(email, 'Beauty+', secret), enc }, null, 2));
+" staff@example.com
+```
+
+Формат конверта (`v1.<iv>.<tag>.<ciphertext>`, base64url, AES-256-GCM) задан в `apps/api/src/common/guards/staff-auth.guard.ts` — секрет, записанный в другом виде, API не расшифрует.
+
+```bash
+# 2. data-vm: сохранить секрет и включить TOTP
+docker compose -f infra/compose/docker-compose.data.yml --env-file .env.data exec -T postgres \
+  psql -U beauty_admin -d beauty -v enc="'<enc>'" -v email="'staff@example.com'" <<'SQL'
+INSERT INTO staff_totp_secrets (staff_user_id, secret_encrypted, verified_at)
+SELECT id, :enc, now() FROM staff_users WHERE email = :email
+ON CONFLICT (staff_user_id) DO UPDATE
+  SET secret_encrypted = EXCLUDED.secret_encrypted, verified_at = now();
+
+UPDATE staff_users SET totp_enabled = true, updated_at = now() WHERE email = :email;
+SQL
+```
+
+`otpauth://`-ссылку добавьте в приложение-аутентификатор и войдите обычным путём. Дальше сброс TOTP сотрудникам делается уже из UI через `totp-reset`.
 
 ## Карта маршрутизации
 
