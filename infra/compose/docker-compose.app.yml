@@ -18,6 +18,8 @@ services:
       - app_net
     environment:
       CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:-}
+      # Docker Engine 29+ rejects API < 1.40; Traefik's client defaults too low.
+      DOCKER_API_VERSION: '1.44'
     labels:
       - traefik.enable=false
 

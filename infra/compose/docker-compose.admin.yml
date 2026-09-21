@@ -16,6 +16,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - admin_net
+    environment:
+      # Docker Engine 29+ rejects API < 1.40; Traefik's client defaults too low.
+      DOCKER_API_VERSION: '1.44'
     labels:
       - traefik.enable=false
 
