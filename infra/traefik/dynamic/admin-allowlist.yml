@@ -1,0 +1,12 @@
+# Default admin allowlist (WireGuard mesh + localhost).
+# Override on adm-vm with: bash infra/traefik/render-allowlist.sh .env.admin
+http:
+  middlewares:
+    admin-allowlist:
+      ipAllowList:
+        sourceRange:
+          - 10.8.0.0/24
+          - 127.0.0.1/32
+          - 192.168.0.0/24
+        ipStrategy:
+          depth: 0

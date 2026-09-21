@@ -90,17 +90,7 @@ http:
         burst: 80
         period: 1m
 
-    # --- IP allowlist for beautyadm.loomixx.ru ---
-    # Generated on the admin VM from ADMIN_ALLOWLIST_SOURCE_RANGE by
-    # infra/traefik/render-allowlist.sh, which the deploy workflow runs before
-    # `compose up`. This file holds the safe default: WireGuard mesh only.
-    admin-allowlist:
-      ipAllowList:
-        sourceRange:
-          - 10.8.0.0/24
-          - 127.0.0.1/32
-        ipStrategy:
-          depth: 0
+    # admin-allowlist lives in admin-allowlist.yml (rendered on adm-vm)
 
     prometheus-stripprefix:
       stripPrefix:

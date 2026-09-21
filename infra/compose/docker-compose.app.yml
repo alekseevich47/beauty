@@ -2,7 +2,6 @@ name: beauty-app
 
 services:
   traefik:
-    # v3.5+ ships a Docker client that negotiates API >= 1.40 (required by Engine 29+)
     image: traefik:v3.5
     restart: unless-stopped
     command:
@@ -12,14 +11,15 @@ services:
       - '443:443'
     volumes:
       - ../traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ../traefik/dynamic:/etc/traefik/dynamic:ro
+      # File provider only — no docker.sock (Engine 29+ API incompatibility)
+      - ../traefik/dynamic/middlewares.yml:/etc/traefik/dynamic/middlewares.yml:ro
+      - ../traefik/dynamic/tls.yml:/etc/traefik/dynamic/tls.yml:ro
+      - ../traefik/dynamic/routers-app.yml:/etc/traefik/dynamic/routers.yml:ro
       - traefik_letsencrypt:/letsencrypt
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - app_net
     environment:
       CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:-}
-      DOCKER_API_VERSION: '1.44'
     labels:
       - traefik.enable=false
 

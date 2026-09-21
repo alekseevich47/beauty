@@ -1,4 +1,6 @@
 # Traefik static config — App VM (beauty.loomixx.ru)
+# Routing is file-based (dynamic/routers-app.yml). Docker provider is disabled:
+# Docker Engine 29+ rejects the API version Traefik's bundled client still sends.
 api:
   dashboard: false
 
@@ -20,10 +22,6 @@ entryPoints:
         - security-headers@file
 
 providers:
-  docker:
-    endpoint: unix:///var/run/docker.sock
-    exposedByDefault: false
-    network: beauty-app_app_net
   file:
     directory: /etc/traefik/dynamic
     watch: true

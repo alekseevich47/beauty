@@ -1,0 +1,77 @@
+# Admin VM routers — file provider (no Docker API; works with Engine 29+)
+# Upstream hostnames are Compose service names on beauty-admin_admin_net.
+http:
+  routers:
+    admin-api:
+      rule: Host(`beautyadm.loomixx.ru`) && PathPrefix(`/api`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - admin-allowlist
+        - admin-ratelimit
+        - compress
+      service: admin-api
+      tls:
+        certResolver: letsencrypt
+      priority: 20
+
+    prometheus:
+      rule: Host(`beautyadm.loomixx.ru`) && PathPrefix(`/prometheus`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - admin-allowlist
+        - admin-ratelimit
+        - prometheus-stripprefix
+      service: prometheus
+      tls:
+        certResolver: letsencrypt
+      priority: 30
+
+    grafana:
+      rule: Host(`beautyadm.loomixx.ru`) && PathPrefix(`/grafana`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - admin-allowlist
+        - admin-ratelimit
+      service: grafana
+      tls:
+        certResolver: letsencrypt
+      priority: 30
+
+    admin-web:
+      rule: Host(`beautyadm.loomixx.ru`) && !PathPrefix(`/api`) && !PathPrefix(`/grafana`) && !PathPrefix(`/prometheus`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - csp-admin
+        - admin-allowlist
+        - admin-ratelimit
+        - compress
+      service: admin-web
+      tls:
+        certResolver: letsencrypt
+      priority: 1
+
+  services:
+    admin-web:
+      loadBalancer:
+        servers:
+          - url: http://admin-web:80
+    admin-api:
+      loadBalancer:
+        servers:
+          - url: http://admin-api:3001
+    prometheus:
+      loadBalancer:
+        servers:
+          - url: http://prometheus:9090
+    grafana:
+      loadBalancer:
+        servers:
+          - url: http://grafana:3000

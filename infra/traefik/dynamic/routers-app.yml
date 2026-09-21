@@ -1,0 +1,73 @@
+# App VM routers — file provider (no Docker API; works with Engine 29+)
+# Upstream hostnames are Compose service names on beauty-app_app_net.
+http:
+  routers:
+    api:
+      rule: Host(`beauty.loomixx.ru`) && PathPrefix(`/api`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - api-ratelimit
+        - compress
+      service: api
+      tls:
+        certResolver: letsencrypt
+      priority: 20
+
+    widget:
+      rule: Host(`beauty.loomixx.ru`) && PathPrefix(`/widget`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - csp-widget
+        - widget-ratelimit
+        - compress
+      service: widget
+      tls:
+        certResolver: letsencrypt
+      priority: 10
+
+    centrifugo:
+      rule: Host(`beauty.loomixx.ru`) && (PathPrefix(`/connection`) || PathPrefix(`/centrifugo`))
+      entryPoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - centrifugo-ratelimit
+      service: centrifugo
+      tls:
+        certResolver: letsencrypt
+      priority: 20
+
+    miniapp:
+      rule: Host(`beauty.loomixx.ru`) && !PathPrefix(`/api`) && !PathPrefix(`/widget`) && !PathPrefix(`/connection`) && !PathPrefix(`/centrifugo`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - security-headers
+        - csp-miniapp
+        - compress
+      service: miniapp
+      tls:
+        certResolver: letsencrypt
+      priority: 1
+
+  services:
+    api:
+      loadBalancer:
+        servers:
+          - url: http://api:3000
+    miniapp:
+      loadBalancer:
+        servers:
+          - url: http://miniapp:80
+    widget:
+      loadBalancer:
+        servers:
+          - url: http://widget:80
+    centrifugo:
+      loadBalancer:
+        servers:
+          - url: http://centrifugo:8000
