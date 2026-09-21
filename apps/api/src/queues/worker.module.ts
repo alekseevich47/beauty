@@ -6,6 +6,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { AppConfigModule } from '../common/config/app-config.module';
 import { DatabaseModule } from '../common/database/database.module';
 import { RedisModule } from '../common/redis/redis.module';
+import { PinoLogger } from '../common/logger/pino.logger';
 
 @Module({
   imports: [
@@ -16,7 +17,7 @@ import { RedisModule } from '../common/redis/redis.module';
     BroadcastsModule,
     NotificationsModule,
   ],
-  providers: [QueueWorkers],
+  providers: [QueueWorkers, PinoLogger],
   exports: [QueueWorkers],
 })
 export class WorkerModule {}
