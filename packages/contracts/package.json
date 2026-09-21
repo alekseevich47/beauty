@@ -2,6 +2,9 @@
   "name": "@beauty/contracts",
   "version": "0.0.1",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/index.d.ts",

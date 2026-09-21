@@ -12,7 +12,11 @@ RUN pnpm install --frozen-lockfile --filter @beauty/api...
 
 FROM deps AS build
 COPY apps/api ./apps/api
-RUN pnpm --filter @beauty/api... build && pnpm deploy --filter=@beauty/api --prod /out
+# pnpm deploy omits gitignored paths (dist/), so copy the build output explicitly.
+RUN pnpm --filter @beauty/api... build \
+  && pnpm deploy --filter=@beauty/api --prod /out \
+  && cp -a apps/api/dist /out/dist \
+  && test -f /out/dist/worker.js
 
 FROM node:22-alpine AS runner
 ENV NODE_ENV=production
